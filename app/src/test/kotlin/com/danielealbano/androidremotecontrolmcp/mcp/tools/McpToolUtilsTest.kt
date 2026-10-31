@@ -3,6 +3,8 @@ package com.danielealbano.androidremotecontrolmcp.mcp.tools
 import com.danielealbano.androidremotecontrolmcp.mcp.McpToolException
 import io.modelcontextprotocol.kotlin.sdk.types.ImageContent
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -193,6 +195,14 @@ class McpToolUtilsTest {
         }
 
         @Test
+        @DisplayName("keeps full precision above 2^53")
+        fun keepsFullPrecisionAboveTwoPow53() {
+            val params = buildJsonObject { put("duration", 9007199254740993L) }
+            assertEquals(9007199254740993L, McpToolUtils.optionalLong(params, "duration", 300L))
+            assertEquals(9007199254740993L, McpToolUtils.requireLong(params, "duration"))
+        }
+
+        @Test
         @DisplayName("rejects fractional value")
         fun rejectsFractionalValue() {
             val params = buildJsonObject { put("duration", 1.5) }
@@ -214,6 +224,26 @@ class McpToolUtilsTest {
                     McpToolUtils.optionalLong(params, "duration", 300L)
                 }
             assertTrue(exception.message!!.contains("got string"))
+        }
+
+        @Test
+        @DisplayName("rejects values outside long range and non-finite literals")
+        fun rejectsOutOfLongRange() {
+            for (literal in listOf("9223372036854775808", "-9223372036854775809", "1e19", "Infinity", "NaN")) {
+                val params = Json.parseToJsonElement("{\"duration\": $literal}") as JsonObject
+                assertThrows<McpToolException.InvalidParams>(literal) {
+                    McpToolUtils.optionalLong(params, "duration", 300L)
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("accepts Long.MIN_VALUE and Long.MAX_VALUE")
+        fun acceptsLongBounds() {
+            val min = Json.parseToJsonElement("{\"duration\": -9223372036854775808}") as JsonObject
+            val max = Json.parseToJsonElement("{\"duration\": 9223372036854775807}") as JsonObject
+            assertEquals(Long.MIN_VALUE, McpToolUtils.optionalLong(min, "duration", 300L))
+            assertEquals(Long.MAX_VALUE, McpToolUtils.optionalLong(max, "duration", 300L))
         }
     }
 
@@ -281,6 +311,26 @@ class McpToolUtilsTest {
                     McpToolUtils.requireLong(params, "duration")
                 }
             assertTrue(exception.message!!.contains("got string"))
+        }
+
+        @Test
+        @DisplayName("rejects values outside long range and non-finite literals")
+        fun rejectsOutOfLongRange() {
+            for (literal in listOf("9223372036854775808", "-9223372036854775809", "1e19", "Infinity", "NaN")) {
+                val params = Json.parseToJsonElement("{\"duration\": $literal}") as JsonObject
+                assertThrows<McpToolException.InvalidParams>(literal) {
+                    McpToolUtils.requireLong(params, "duration")
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("accepts Long.MIN_VALUE and Long.MAX_VALUE")
+        fun acceptsLongBounds() {
+            val min = Json.parseToJsonElement("{\"duration\": -9223372036854775808}") as JsonObject
+            val max = Json.parseToJsonElement("{\"duration\": 9223372036854775807}") as JsonObject
+            assertEquals(Long.MIN_VALUE, McpToolUtils.requireLong(min, "duration"))
+            assertEquals(Long.MAX_VALUE, McpToolUtils.requireLong(max, "duration"))
         }
 
         @Test

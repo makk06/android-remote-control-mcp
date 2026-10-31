@@ -325,6 +325,29 @@ class MediaStoreFileOperationsTest {
             }
 
         @Test
+        fun `listFiles reports no more entries for an offset near Int MAX_VALUE`() =
+            runTest {
+                val rows =
+                    (1..5).map { i ->
+                        mapOf(
+                            "id" to i.toLong(),
+                            "name" to "file$i.txt",
+                            "relPath" to "Download/",
+                            "size" to 100L,
+                            "dateModified" to 1700000000L,
+                            "mimeType" to "text/plain",
+                        )
+                    }
+                stubQueryReturning(createMockCursor(rows))
+
+                val result = operations.listFiles("builtin:downloads", "", Int.MAX_VALUE, 200)
+
+                assertEquals(5, result.totalCount)
+                assertTrue(result.files.isEmpty())
+                assertFalse(result.hasMore)
+            }
+
+        @Test
         fun `listFiles returns all files in all-files mode`() =
             runTest {
                 every { BuiltinStorageLocation.DOWNLOADS.collections } returns
@@ -1207,6 +1230,28 @@ class MediaStoreFileOperationsTest {
             }
 
         @Test
+        fun `replaceInFile throws ActionFailed when replace_all growth exceeds size limit`() =
+            runTest {
+                coEvery { mockSettingsRepository.getServerConfig() } returns ServerConfig(fileSizeLimitMb = 1)
+                stubFindOwnedFile(id = 1L, found = true)
+                stubFileSizeQuery(size = REPLACE_GROWTH_FILE_BYTES)
+                every {
+                    mockContentResolver.openInputStream(any())
+                } returns ByteArrayInputStream("a".repeat(REPLACE_GROWTH_FILE_BYTES.toInt()).toByteArray())
+                val outputStream = ByteArrayOutputStream()
+                every {
+                    mockContentResolver.openOutputStream(eq(fakeFileUri), eq("wt"))
+                } returns outputStream
+
+                val exception =
+                    assertThrows<McpToolException.ActionFailed> {
+                        operations.replaceInFile("builtin:downloads", "test.txt", "a", "bb", replaceAll = true)
+                    }
+                assertTrue(exception.message!!.contains("exceed the configured file size limit"))
+                assertEquals(0, outputStream.size())
+            }
+
+        @Test
         fun `replaceInFile throws for non-owned file`() =
             runTest {
                 stubFindOwnedFile(id = 1L, found = false)
@@ -1460,6 +1505,7 @@ class MediaStoreFileOperationsTest {
     }
 
     private companion object {
+        const val REPLACE_GROWTH_FILE_BYTES = 600_000L
         const val TEN_MB = 10L * 1024 * 1024
         const val OVERSIZE_BYTES = 100_000_000L
         const val IO_THREAD = "mediastore-io-test"
