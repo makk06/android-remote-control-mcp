@@ -7,8 +7,9 @@ import java.net.InetAddress
 /**
  * True when [address] is on the device itself or on its local network, as blocked by "Block Local Network
  * Downloads": loopback, unspecified (0.0.0.0/8 and `::` reach the device itself), private LAN (RFC 1918), link-local
- * (including the 169.254.169.254 cloud metadata address), CGNAT / Tailscale (100.64.0.0/10), IPv6 unique local
- * addresses, and the IPv4-mapped / IPv4-compatible IPv6 forms of the IPv4 ranges.
+ * (including the 169.254.169.254 cloud metadata address), CGNAT / Tailscale (100.64.0.0/10), the IETF protocol
+ * block 192.0.0.0/24 (holds the device's own 464XLAT address 192.0.0.4), IPv6 unique local and deprecated site-local
+ * (fec0::/10) addresses, and the IPv4-mapped / IPv4-compatible IPv6 forms of the IPv4 ranges.
  */
 internal fun isLocalNetworkAddress(address: InetAddress): Boolean =
     when (address) {
@@ -33,8 +34,9 @@ private fun isLocalIpv4(octets: ByteArray): Boolean {
         // 172.16.0.0/12
         PRIVATE_172_FIRST_OCTET -> second in PRIVATE_172_SECOND_OCTETS
 
-        // 192.168.0.0/16
-        PRIVATE_192_FIRST_OCTET -> second == PRIVATE_192_SECOND_OCTET
+        // 192.168.0.0/16 and 192.0.0.0/24 (IETF protocol assignments, e.g. the 464XLAT CLAT address 192.0.0.4 of
+        // this device)
+        PRIVATE_192_FIRST_OCTET -> second == PRIVATE_192_SECOND_OCTET || isIetfProtocolBlock(octets)
 
         // 169.254.0.0/16 (link-local, cloud metadata)
         LINK_LOCAL_FIRST_OCTET -> second == LINK_LOCAL_SECOND_OCTET
@@ -45,6 +47,8 @@ private fun isLocalIpv4(octets: ByteArray): Boolean {
         else -> false
     }
 }
+
+private fun isIetfProtocolBlock(octets: ByteArray): Boolean = octets[1] == 0.toByte() && octets[2] == 0.toByte()
 
 private fun isLocalIpv6(bytes: ByteArray): Boolean {
     val first = bytes[0].toInt() and BYTE_MASK
@@ -60,6 +64,11 @@ private fun isLocalIpv6(bytes: ByteArray): Boolean {
             true
         }
 
+        // fec0::/10 (deprecated site-local, still routed inside some private networks)
+        isIpv6SiteLocal(first, second) -> {
+            true
+        }
+
         // ::ffff:a.b.c.d (IPv4-mapped)
         isZero(bytes, 0, IPV4_MAPPED_PREFIX_END) && isMappedMarker(bytes) -> {
             isLocalIpv4(bytes.copyOfRange(IPV4_EMBEDDED_START, IPV6_LENGTH))
@@ -68,6 +77,12 @@ private fun isLocalIpv6(bytes: ByteArray): Boolean {
         // :: (unspecified), ::1 (loopback) and ::a.b.c.d (IPv4-compatible): the embedded IPv4 of :: is 0.0.0.0 and of
         // ::1 is 0.0.0.1, both inside 0.0.0.0/8, so one check covers all three.
         isZero(bytes, 0, IPV4_EMBEDDED_START) -> {
+            isLocalIpv4(bytes.copyOfRange(IPV4_EMBEDDED_START, IPV6_LENGTH))
+        }
+
+        // 64:ff9b::a.b.c.d (NAT64): the gateway connects to the embedded IPv4 address
+        bytes.copyOfRange(0, NAT64_PREFIX.size).contentEquals(NAT64_PREFIX) &&
+            isZero(bytes, NAT64_PREFIX.size, IPV4_EMBEDDED_START) -> {
             isLocalIpv4(bytes.copyOfRange(IPV4_EMBEDDED_START, IPV6_LENGTH))
         }
 
@@ -83,6 +98,13 @@ private fun isIpv6LinkLocal(
 ): Boolean =
     first == IPV6_LINK_LOCAL_FIRST_BYTE &&
         (second and IPV6_LINK_LOCAL_SECOND_MASK) == IPV6_LINK_LOCAL_SECOND_BITS
+
+private fun isIpv6SiteLocal(
+    first: Int,
+    second: Int,
+): Boolean =
+    first == IPV6_LINK_LOCAL_FIRST_BYTE &&
+        (second and IPV6_LINK_LOCAL_SECOND_MASK) == IPV6_SITE_LOCAL_SECOND_BITS
 
 private fun isZero(
     bytes: ByteArray,
@@ -107,9 +129,11 @@ private val CGNAT_SECOND_OCTETS = 64..127
 private const val IPV6_LINK_LOCAL_FIRST_BYTE = 0xfe
 private const val IPV6_LINK_LOCAL_SECOND_MASK = 0xc0
 private const val IPV6_LINK_LOCAL_SECOND_BITS = 0x80
+private const val IPV6_SITE_LOCAL_SECOND_BITS = 0xc0
 private const val IPV6_ULA_MASK = 0xfe
 private const val IPV6_ULA_BITS = 0xfc
 private const val IPV4_MAPPED_PREFIX_END = 10
 private const val IPV4_EMBEDDED_START = 12
 private const val IPV6_LENGTH = 16
 private const val MAPPED_MARKER = 0xff.toByte()
+private val NAT64_PREFIX = byteArrayOf(0x00, 0x64, 0xff.toByte(), 0x9b.toByte())

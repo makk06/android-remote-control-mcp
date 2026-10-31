@@ -532,12 +532,7 @@ class WaitForIdleTool
                 )
             }
 
-            val matchPercentage =
-                arguments["match_percentage"]
-                    ?.jsonPrimitive
-                    ?.longOrNull
-                    ?.toInt()
-                    ?: DEFAULT_MATCH_PERCENTAGE
+            val matchPercentage = McpToolUtils.optionalInt(arguments, "match_percentage", DEFAULT_MATCH_PERCENTAGE)
             if (matchPercentage < 0 || matchPercentage > TreeFingerprint.FULL_MATCH_PERCENTAGE) {
                 throw McpToolException.InvalidParams(
                     "match_percentage must be between 0 and " +
@@ -835,6 +830,9 @@ fun registerUtilityTools(
     toolNamePrefix: String,
     perms: ToolPermissionsConfig,
 ) {
+    if (perms.isToolEnabled(GetAccessibilityStatusTool.TOOL_NAME)) {
+        GetAccessibilityStatusTool(accessibilityServiceProvider).register(registrar, toolNamePrefix)
+    }
     if (perms.isToolEnabled(GetClipboardTool.TOOL_NAME)) {
         GetClipboardTool(accessibilityServiceProvider, privacyToolGate).register(registrar, toolNamePrefix)
     }
